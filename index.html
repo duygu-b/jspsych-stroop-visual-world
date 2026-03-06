@@ -217,9 +217,9 @@
             return {
                 timeline: [makeStroopTrial(values, phase = "practice"), stroop_feedback],
                 loop_function: function () {
-                    const trials = jsPsych.data.get().filter({task: 'stroop'}).last(1).values(); // son iki trial: Stroop + feedback
-                    const stroop_trial = trials[0]; // ilk olan Stroop trial
-                    return !stroop_trial.correct; // yanlışsa tekrar et
+                    const trials = jsPsych.data.get().filter({task: 'stroop'}).last(1).values(); 
+                    const stroop_trial = trials[0]; 
+                    return !stroop_trial.correct; 
                 }
             };
         }
@@ -259,10 +259,10 @@
             ]
         };
         const positions = [
-            {x: 100, y: 100}, // sol üst
-            {x: 400, y: 100}, // sağ üst
-            {x: 100, y: 350}, // sol alt
-            {x: 400, y: 350}, // sağ alt
+            {x: 100, y: 100}, // top left
+            {x: 400, y: 100}, // top right
+            {x: 100, y: 350}, // bottom left
+            {x: 400, y: 350}, // bottom right
         ];
         const eligible_text = {
             type: jsPsychHtmlButtonResponse,
@@ -1514,4 +1514,5 @@
         timeline.push(end_screen);
         jsPsych.run(timeline);
     </script>
+
 </html>
