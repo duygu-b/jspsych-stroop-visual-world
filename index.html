@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Visual World Task</title>
+        <script src="jspsych/jspsych.js"></script>
+        <script src="jspsych/plugin-free-sort-c.js"></script>
+        <script src="jspsych/plugin-html-button-response.js"></script>
+        <script src="jspsych/plugin-survey-multi-choice.js"></script>
+        <script src="jspsych/plugin-survey-likert.js"></script>
+        <script src="jspsych/plugin-survey-text.js"></script>
+        <script src="jspsych/plugin-html-keyboard-response.js"></script>
+        <script src="jspsych/plugin-preload.js"></script>
+        <link href="jspsych/jspsych.css" rel="stylesheet" type="text/css" />
+        <script src="https://unpkg.com/webgazer@3.4.0/dist/webgazer.js"></script> 
+        <script src="jspsych/plugin-webgazer-validate.js"></script>
+        
+
+    </head>
+    <body></body>
+    <script>
+        let lastGazeData = null;
+        const jsPsych = initJsPsych({
+            override_safe_mode: true,
+            on_finish: function() {
+                if (window.webgazer) webgazer.end();
+                jsPsych.data.displayData('csv')
+            }
+        })
+        const welcome = {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: '<h1> <b>Welcome!</b></h1> <p style="font-size: 22px;">We will first ask you a few quick questions about your language background.</h4>',
+			choices: ['Next'],
+        };
+        const calibration_done = {
+			type: jsPsychHtmlButtonResponse,
+			stimulus: '<p><b>Great, we are done with calibration.</b></p> <p>Please continue for the instructions.</p>',
+			choices: ['Continue'],
+            on_start: function() {
+                if (window.webgazer) {
+                    webgazer.showPredictionPoints(false); 
+                    webgazer.showVideoPreview(false);  
+                    webgazer.showFaceOverlay(false);     
+                }
+            }
+		};
+        const instructions1 = {
+			type: jsPsychHtmlButtonResponse,
+			stimulus: '<p>In this experiment you will complete a <b>colour-word task</b> and a <b>language task</b>.</p><p>The two tasks will appear one after another throughout the experiment.</p><p> In both tasks, to make your selections, you will use your <b>mouse only.</b></p> <p> Before the main experiment, you will have <b>a short trial</b> to be familiar with the tasks.</p>',
+			choices: ['<b>Start Trial</b>'],
+        };
+        const instructions2 = {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: '<p style="font-size: 20px;"> Let\'s try the colour-word task.</p> <h3>Select the ink colour of the word.</h3>',
+			choices: ['Next'],
+
+        };
+        const instructions3 = {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: '<h2> Great! </h2><p style="font-size: 20px;"> Now, let\'s try the language task.</p><h3> You will hear a sentence, and drag and drop the object.</h3><p> Please make sure your computer\'s <b>SOUND IS ON.</b></p><h3> Please DO NOT use Bluetooth headphones, as they may cause audio delays.</h3>',
+			choices: ['Next'],
+        };
+        
+
+
+        //Fonctions
+        function checkAccuracy(final_locations, correct_image, target_image) {
+            const obj = final_locations.find(o => o.src.includes(correct_image));
+            const target = final_locations.find(o => o.src.includes(target_image));
+
+            if (!obj || !target) {
+                return 0;
+            }
+
+            const objLeft   = obj.x;
+            const objRight  = obj.x + 100;
+            const objTop    = obj.y;
+            const objBottom = obj.y + 100;
+
+            const targetLeft   = target.x;
+            const targetRight  = target.x + 100;
+            const targetTop    = target.y;
+            const targetBottom = target.y + 100;
+
+            const overlaps =
+                objRight  >= targetLeft  &&
+                objLeft   <= targetRight &&
+                objBottom >= targetTop   &&
+                objTop    <= targetBottom;
+
+                if (overlaps) {
+                    return 1;
+                } else {
+                return 0;
+            }
+        }
+        function getFilenameFromSrc(src) {
+            return src.split("/").pop().split("?")[0];
+        }
+        function getCurrentROIs() {
+            const container = document.querySelector("#jspsych-content") || document;
+            const imgs = Array.from(container.querySelectorAll("img"));
+              return imgs.map(img => {
+            const r = img.getBoundingClientRect(); // viewport koordinatları
+                return {
+                label: getFilenameFromSrc(img.src),
+                left: r.left,
+                right: r.right,
+                top: r.top,
+                bottom: r.bottom
+                };
+            });
+        }
+        function whichROI(x, y, rois) {
+            for (const roi of rois) {
+                if (x >= roi.left && x <= roi.right && y >= roi.top && y <= roi.bottom) {
+                    return roi.label;
+                }
+            }
+            return "background";
+        }
+        function updateValidationUI() {
+            const status = document.getElementById('status-text');
+            const dot = document.getElementById('target-dot');
+            const instr = document.getElementById('instruction-text');
+            
+            if (status) {
+                status.innerText = "System Ready";
+                status.style.color = "green";
+                dot.style.opacity = "1";
+                instr.style.visibility = "visible";
+            }
+        }
+        function calculateValidationError(gazeData) {
+            if (!gazeData) return null;
+
+            // purple dot for validation
+            const targetX = window.innerWidth / 2;
+            const targetY = window.innerHeight / 2;
+
+            const dx = gazeData.x - targetX;
+            const dy = gazeData.y - targetY;
+
+            return Math.sqrt(dx * dx + dy * dy); // pixel error
+        }
+
+        // keyboard control
+        function handleValidationSpace(e) {
+            if (e.code === 'Space' && lastGazeData) {
+                window.removeEventListener('keydown', handleValidationSpace);
+                jsPsych.finishTrial();
+            }
+        }
+
+        //Stroop
+        const colours = ['red', 'green', 'blue'];
+
+        function congruent() {
+            const c = jsPsych.randomization.sampleWithReplacement(colours, 1)[0];
+            return { text: c, colour: c, condition: 'congruent' };
+        }
+        function incongruent() {
+            const c = jsPsych.randomization.sampleWithoutReplacement(colours, 2);
+            return { text: c[0], colour: c[1], condition: 'incongruent' };
+        }
+
+        const fixation_stroop = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: '<p style="font-size:60px">+</p>',
+            trial_duration: 500,
+            response_ends_trial: false
+        };
+        const iti = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: '',
+            trial_duration: 250,
+            response_ends_trial: false
+        };
+        function makeStroopTrial(values, phase = "main") {
+            const colourMap = { red: 0, green: 1, blue: 2 };
+            return {
+                timeline: [iti, fixation_stroop, {
+                    type: jsPsychHtmlButtonResponse, 
+                    stimulus: `<p style="font-size:60px; color:${values.colour}">${values.text}</p>`,
+                    choices: [
+                        '<div style="width:60px; height:60px; background-color:red; border:1px solid black; border-countsroi_counts:5px;"></div>',
+                        '<div style="width:60px; height:60px; background-color:green; border:1px solid black; border-countsroi_counts:5px;"></div>',
+                        '<div style="width:60px; height:60px; background-color:blue; border:1px solid black; border-countsroi_counts:5px;"></div>'
+                    ],
+                    data:{ task: 'stroop', phase: phase, values, correct_response: colourMap[values.colour] },
+                    on_finish: function(data) {
+                        data.correct = data.response == data.correct_response;
+                    }
+                }]
+            };
+        }
+        let extra_stroops = [];
+        for (let i = 0; i < 60; i++) {
+        let values = (i % 2 === 0) ? congruent() : incongruent();
+        extra_stroops.push([makeStroopTrial(values)]);
+        }
+        const stroop_feedback = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: function () {
+                const lastStroop = jsPsych.data.get().filter({task: 'stroop'}).last(1).values()[0];
+                if (lastStroop.correct) {
+                    return '<p style="color:green; font-size:28px;">Correct!</p>';
+                }
+                else {
+                    return '<p style="color:red; font-size:28px;">Oops! Select the ink colour!</p>';
+                }
+            },
+            choices: "NO_KEYS",
+            trial_duration: 1100
+        };
+        function repeatTillCorrectStroop (values) {
+            return {
+                timeline: [makeStroopTrial(values, phase = "practice"), stroop_feedback],
+                loop_function: function () {
+                    const trials = jsPsych.data.get().filter({task: 'stroop'}).last(1).values(); // son iki trial: Stroop + feedback
+                    const stroop_trial = trials[0]; // ilk olan Stroop trial
+                    return !stroop_trial.correct; // yanlışsa tekrar et
+                }
+            };
+        }
+        // 2) Stroop samples
+        const practice_congruent1 = repeatTillCorrectStroop(congruent()); 
+        const practice_incongruent1 = repeatTillCorrectStroop(incongruent());
+        const practice_congruent2 = repeatTillCorrectStroop(congruent());
+        const practice_incongruent2 = repeatTillCorrectStroop(incongruent());
+
+        //Visual World
+        const preload = {
+            type: jsPsychPreload,
+            audio: ["audio/amb1.wav", "audio/amb2.wav", "audio/amb3.wav", "audio/amb4.wav", "audio/amb5.wav", "audio/amb6.wav", "audio/amb7.wav", "audio/amb8.wav", "audio/amb9.wav", "audio/amb10.wav", "audio/amb11.wav", "audio/amb12.wav", "audio/amb13.wav", "audio/amb14.wav", "audio/amb15.wav", "audio/amb16.wav", "audio/amb17.wav", "audio/amb18.wav", "audio/amb19.wav", "audio/amb20.wav",
+            "audio/unamb1.wav", "audio/unamb2.wav", "audio/unamb3.wav", "audio/unamb4.wav", "audio/unamb5.wav", "audio/unamb6.wav", "audio/unamb7.wav", "audio/unamb8.wav", "audio/unamb9.wav", "audio/unamb10.wav", "audio/unamb11.wav", "audio/unamb12.wav", "audio/unamb13.wav", "audio/unamb14.wav", "audio/unamb15.wav", "audio/unamb16.wav", "audio/unamb17.wav", "audio/unamb18.wav", "audio/unamb19.wav", "audio/unamb20.wav",   
+            "audio/filler1.wav"],
+            images: [
+                "images/frog.png", "images/box.png", "images/napkin.png", "images/horse.png",
+                "images/rabbit.png", "images/tray.png", "images/towel.png", "images/bird.png",
+                "images/panda.png", "images/chair.png", "images/blanket.png", "images/cow.png",
+                "images/cat.png", "images/shelf.png", "images/pillow.png", "images/sheep.png",
+                "images/brush.png", "images/table.png", "images/magazine.png", "images/wrench.png",
+                "images/marker.png", "images/scarf.png", "images/blanket.png", "images/stapler.png",
+                "images/orange.png", "images/tray.png", "images/plate.png", "images/pear.png",
+                "images/bell.png", "images/pillow.png", "images/napkin.png", "images/whistle.png",
+                "images/candle.png", "images/card.png", "images/plate.png", "images/lamp.png",
+                "images/glasses.png", "images/book.png", "images/glove.png", "images/hat.png",
+                "images/hammer.png", "images/tshirt.png", "images/tray.png", "images/nail.png",
+                "images/rock.png", "images/glove.png", "images/book.png", "images/flower.png",
+                "images/pen.png", "images/desk.png", "images/notebook.png", "images/ruler.png",
+                "images/cup.png", "images/tray.png", "images/book.png", "images/fork.png",
+                "images/phone.png", "images/shelf.png", "images/folder.png", "images/clock.png",
+                "images/notebook.png", "images/chair.png", "images/calendar.png", "images/envelope.png",
+                "images/folder.png", "images/bench.png", "images/placemat.png", "images/book.png",
+                "images/spoon.png", "images/napkin.png", "images/box.png", "images/fork.png",
+                "images/card.png", "images/rug.png", "images/plate.png", "images/ticket.png", "images/couch.png",
+                "images/sticker.png", "images/mat.png", "images/paper.png", "images/tag.png", "images/bottle.png"
+            ]
+        };
+        const positions = [
+            {x: 100, y: 100}, // sol üst
+            {x: 400, y: 100}, // sağ üst
+            {x: 100, y: 350}, // sol alt
+            {x: 400, y: 350}, // sağ alt
+        ];
+        const eligible_text = {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: "<h2>Thank you!</h2> <p>Click the button below to start the experiment.</p>",
+            choices: ["Start"],
+        };
+        const calibration = {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: `
+                <p>
+                This experiment uses your <b>webcam for eye-tracking.</b>
+                </p>
+                <p>
+                Before the experiment starts, we will run a short calibration.
+                During <b>calibration</b>, please <b> allow camera access </b> and look at the screen.
+                </p>
+                <h3>Please make sure <span style="color: blue;">the room is well-lit</span> and <span style="color: blue;">your face remains clearly visible to the camera THROUGHOUT the experiment.</span></h3>
+                <p>
+                No video will be recorded or stored.
+                </p>
+                <p>
+                When you are ready, click the button below to start the calibration.
+                </p>
+            `,
+            choices: ["Start calibration"],
+            on_finish: async function () {
+                await webgazer.clearGazeListener();
+                await webgazer.begin();
+                webgazer.showPredictionPoints(true);
+                webgazer.showVideoPreview(true);
+                webgazer.showFaceOverlay(true);
+            }
+        };
+        const validation = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: `
+                <div style="width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center;">
+                    <div style="text-align: center;">
+                        <p><b>Quality Check</b></p>
+                        <p>Please look directly at the <b>PURPLE DOT</b> and press <b>SPACE</b>.</p>
+                        <div style="width: 20px; height: 20px; background: purple; border-countsroi_counts: 50%; margin: 20px auto; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>
+                    </div>
+                </div>
+            `,
+            choices: "NO_KEYS",
+            on_load: function() {
+                webgazer.setGazeListener((data) => {
+                    if (data) {
+                        lastGazeData = data;
+                        updateValidationUI(); 
+                        window.addEventListener('keydown', handleValidationSpace); 
+                    }
+                });
+            },
+            on_finish: function(data) {
+                data.validation_error_px = calculateValidationError(lastGazeData);
+                data.phase = "validation";
+                
+                webgazer.clearGazeListener();
+            }
+        };
+        const start_experiment = {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: '<h2>Well done!</h2><p> Now, when you\'re ready, click the button below to begin the main experiment.</p>',
+			choices: ['<b>Start Experiment</b>'],
+        };
+        const fixation_vw = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: '<p style="font-size: 48px;">+</p>',
+            choices: "NO_KEYS",
+            trial_duration: 500,
+            on_load: function() {
+                // intrial gaze validation
+                window.tempGazeSamples = [];
+                webgazer.setGazeListener((data) => {
+                    if (data) {
+                        window.tempGazeSamples.push({x: data.x, y: data.y});
+                    }
+                });
+            },
+            on_finish: function(data) {
+                // stop listener
+                webgazer.clearGazeListener();
+
+                // 4. average of gaze samples
+                if (window.tempGazeSamples.length > 0) {
+                    const avgX = window.tempGazeSamples.reduce((s, a) => s + a.x, 0) / window.tempGazeSamples.length;
+                    const avgY = window.tempGazeSamples.reduce((s, a) => s + a.y, 0) / window.tempGazeSamples.length;
+                    
+                    const targetX = window.innerWidth / 2;
+                    const targetY = window.innerHeight / 2;
+                    
+                    // Euclidian distance formula
+                    data.trial_validation_error = Math.sqrt(Math.pow(avgX - targetX, 2) + Math.pow(avgY - targetY, 2));
+                } else {
+                    data.trial_validation_error = null;
+                }
+            }
+        };
+        const drag_drop = {
+            type: jsPsychFreeSort,
+            stimuli: jsPsych.timelineVariable("images"),
+            start_positions: function() {
+                const s = jsPsych.randomization.shuffle(positions);
+                const num_images = jsPsych.evaluateTimelineVariable("images").length;
+
+                if (num_images === 5) {
+                    return [s[0], s[0], s[1], s[2], s[3]];
+                } else {
+                    return [s[0], s[1], s[2], s[3]];
+                }
+            },
+            stim_width: 100,
+            stim_height: 100,
+            sort_area_width: 600,
+            sort_area_height: 500,
+            stim_starts_inside: true,
+            prompt: "<p>Listen and then drag-drop the correct image.</p>",
+            data: {
+                sentence_id: jsPsych.timelineVariable("sentence_id"),
+                condition: jsPsych.timelineVariable("condition"),
+                correct_image: jsPsych.timelineVariable("correct_image"),
+                target_image: jsPsych.timelineVariable("target_image")
+            },
+
+            on_start: function() {
+                // 1. hide mouse icon
+                const style = document.createElement('style');
+                style.id = 'hide-cursor';
+                style.innerHTML = '* { cursor: none !important; }';
+                document.head.appendChild(style);
+
+                const area = document.querySelector('.jspsych-free-sort-area');
+                if(area) area.style.pointerEvents = 'none';
+
+                // 2. voice check
+                const audioPath = jsPsych.evaluateTimelineVariable("audio");
+                window.currentAudio = new Audio(audioPath);
+
+                // Trial start time
+                window.trialStartGlobal = performance.now();
+
+                // playback time
+                window.currentAudio.addEventListener("playing", function() {
+                    window.audioStartGlobal = performance.now();
+                });
+
+                window.currentAudio.onended = function() {
+                    const cursorStyle = document.getElementById('hide-cursor');
+                    if (cursorStyle) cursorStyle.remove(); // after audio, show mouse cursor
+                    if(area) area.style.pointerEvents = 'auto';
+                };
+
+                //300ms delay for audio
+                setTimeout(() => {
+                    window.currentAudio.play();
+                }, 300);
+
+                window.currentAudio.play();
+
+                // 3. Mouse Trajectory
+                window.mouse_trajectory = [];
+                window.mouseListener = (e) => {
+                    window.mouse_trajectory.push({x: e.clientX, y: e.clientY, t: performance.now()});
+                };
+                document.addEventListener('mousemove', window.mouseListener);
+
+                // 4. WebGazer ROI counts
+                window.roi_counts = { background: 0 };
+
+                // ROI transitions/sequence
+                window.roi_transitions = [];
+                window.last_roi = null;
+                // WebGazer listener
+                webgazer.setGazeListener((g, time) => {
+                    if (!g) return;
+
+                    const x = g.x;
+                    const y = g.y;
+
+                    // Because the objects can move, we get the latest ROI boxes for each sample
+                    const rois = getCurrentROIs();
+                    const hit = whichROI(x, y, rois);
+
+                    // counts
+                    window.roi_counts[hit] = (window.roi_counts[hit] || 0) + 1;
+
+                    // transitions
+                    if (hit !== window.last_roi) {
+                    window.roi_transitions.push({ roi: hit, t: time });
+                    window.last_roi = hit;
+                    }
+                });
+
+            }, 
+            on_finish: function (data){
+                document.removeEventListener('mousemove', window.mouseListener);
+                document.body.style.cursor = 'auto';
+                data.mouse_trajectory = window.mouse_trajectory;
+                data.roi_counts = window.roi_counts;
+                data.roi_transitions = window.roi_transitions;
+
+                data.audio_start_global = window.audioStartGlobal;
+                data.trial_start_global = window.trialStartGlobal;
+
+                // turn off listener 
+                webgazer.clearGazeListener();
+
+                if (data.condition === "ambiguous" || data.condition === "unambiguous" || data.condition === "filler" || data.condition === "practice") {
+                    data.accuracy = checkAccuracy(
+                        data.final_locations,
+                        data.correct_image,
+                        data.target_image
+                    );
+                } else {
+                    data.accuracy = "NA";
+                }
+            }
+        };
+
+        
+        const sentences = [
+            {
+                sentence_id: "amb1", 
+                condition: "ambiguous",
+                correct_image: "frog.png",
+                support_image: "napkin.png",
+                target_image: "box.png",
+                images: ["images/napkin.png", "images/frog.png", "images/horse.png", "images/napkin.png?v=2", "images/box.png"],
+                audio: "audio/amb1.wav"
+            },
+            {
+                sentence_id: "amb2",
+                condition: "ambiguous",
+                correct_image: "rabbit.png",
+                support_image: "towel.png",
+                target_image: "tray.png",
+                images: ["images/towel.png", "images/rabbit.png", "images/bird.png", "images/towel.png?v=2", "images/tray.png"],
+                audio: "audio/amb2.wav"
+            },
+            {
+                sentence_id: "amb3", 
+                condition: "ambiguous",
+                correct_image: "panda.png",
+                support_image: "blanket.png",
+                target_image: "chair.png",
+                images: ["images/blanket.png", "images/panda.png", "images/cow.png", "images/blanket.png?v=2", "images/chair.png"],
+                audio: "audio/amb3.wav"
+            },
+            {
+                sentence_id: "amb4", 
+                condition: "ambiguous",
+                correct_image: "cat.png",
+                support_image: "pillow.png",
+                target_image: "shelf.png",
+                images: ["images/pillow.png", "images/cat.png", "images/sheep.png", "images/pillow.png?v=2", "images/shelf.png"],
+                audio: "audio/amb4.wav"
+            },
+            {
+                sentence_id: "amb5", 
+                condition: "ambiguous",
+                correct_image: "brush.png",
+                support_image: "magazine.png",
+                target_image: "table.png",
+                images: ["images/magazine.png", "images/brush.png", "images/wrench.png", "images/magazine.png?v=2", "images/table.png"],
+                audio: "audio/amb5.wav"
+            },
+            {
+                sentence_id: "amb6", 
+                condition: "ambiguous",
+                correct_image: "marker.png",
+                support_image: "blanket.png",
+                target_image: "scarf.png",
+                images: ["images/blanket.png", "images/marker.png", "images/stapler.png", "images/blanket.png?v=2", "images/scarf.png"],
+                audio: "audio/amb6.wav"
+            },
+            {
+                sentence_id: "amb7", 
+                condition: "ambiguous",
+                correct_image: "orange.png",
+                support_image: "plate.png",
+                target_image: "tray.png",
+                images: ["images/plate.png", "images/orange.png", "images/pear.png", "images/plate.png?v=2", "images/tray.png"],
+                audio: "audio/amb7.wav"
+            },
+            {
+                sentence_id: "amb8", 
+                condition: "ambiguous",
+                correct_image: "bell.png",
+                support_image: "napkin.png",
+                target_image: "pillow.png",
+                images: ["images/napkin.png", "images/bell.png", "images/whistle.png", "images/napkin.png?v=2", "images/pillow.png"],
+                audio: "audio/amb8.wav"
+            },
+            {
+                sentence_id: "amb9", 
+                condition: "ambiguous",
+                correct_image: "candle.png",
+                support_image: "plate.png",
+                target_image: "card.png",
+                images: ["images/plate.png", "images/candle.png", "images/lamp.png", "images/plate.png?v=2", "images/card.png"],
+                audio: "audio/amb9.wav"
+            },
+            {
+                sentence_id: "amb10", 
+                condition: "ambiguous",
+                correct_image: "glasses.png",
+                support_image: "glove.png",
+                target_image: "book.png",
+                images: ["images/glove.png", "images/glasses.png", "images/hat.png", "images/glove.png?v=2", "images/book.png"],
+                audio: "audio/amb10.wav"
+            },
+            {
+                sentence_id: "amb11", 
+                condition: "ambiguous",
+                correct_image: "hammer.png",
+                support_image: "tray.png",
+                target_image: "tshirt.png",
+                images: ["images/tray.png", "images/hammer.png", "images/nail.png", "images/tray.png?v=2", "images/tshirt.png"],
+                audio: "audio/amb11.wav"
+            },
+            {
+                sentence_id: "amb12", 
+                condition: "ambiguous",
+                correct_image: "rock.png",
+                support_image: "book.png",
+                target_image: "glove.png",
+                images: ["images/book.png", "images/rock.png", "images/flower.png", "images/book.png?v=2", "images/glove.png"],
+                audio: "audio/amb12.wav"
+            },
+            {
+                sentence_id: "amb13", 
+                condition: "ambiguous",
+                correct_image: "pen.png",
+                support_image: "notebook.png",
+                target_image: "desk.png",
+                images: ["images/notebook.png", "images/pen.png", "images/ruler.png", "images/notebook.png?v=2", "images/desk.png"],
+                audio: "audio/amb13.wav"
+            },
+            {
+                sentence_id: "amb14", 
+                condition: "ambiguous",
+                correct_image: "cup.png",
+                support_image: "book.png",
+                target_image: "tray.png",
+                images: ["images/book.png", "images/cup.png", "images/fork.png", "images/book.png?v=2", "images/tray.png"],
+                audio: "audio/amb14.wav"
+            },
+            {
+                sentence_id: "amb15", 
+                condition: "ambiguous",
+                correct_image: "phone.png",
+                support_image: "folder.png",
+                target_image: "shelf.png",
+                images: ["images/folder.png", "images/phone.png", "images/clock.png", "images/folder.png?v=2", "images/shelf.png"],
+                audio: "audio/amb15.wav"
+            },
+            {
+                sentence_id: "amb16", 
+                condition: "ambiguous",
+                correct_image: "notebook.png",
+                support_image: "calendar.png",
+                target_image: "chair.png",
+                images: ["images/calendar.png", "images/notebook.png", "images/envelope.png", "images/calendar.png?v=2", "images/chair.png"],
+                audio: "audio/amb16.wav"
+            },
+            {
+                sentence_id: "amb17", 
+                condition: "ambiguous",
+                correct_image: "folder.png",
+                support_image: "placemat.png",
+                target_image: "bench.png",
+                images: ["images/placemat.png", "images/folder.png", "images/book.png", "images/placemat.png?v=2", "images/bench.png"],
+                audio: "audio/amb17.wav"
+            },
+            {
+                sentence_id: "amb18", 
+                condition: "ambiguous",
+                correct_image: "spoon.png",
+                support_image: "box.png",
+                target_image: "napkin.png",
+                images: ["images/box.png", "images/spoon.png", "images/fork.png", "images/box.png?v=2", "images/napkin.png"],
+                audio: "audio/amb18.wav"
+            },
+            {
+                sentence_id: "amb19", 
+                condition: "ambiguous",
+                correct_image: "card.png",
+                support_image: "plate.png",
+                target_image: "rug.png",
+                images: ["images/plate.png", "images/card.png", "images/ticket.png", "images/plate.png?v=2", "images/rug.png"],
+                audio: "audio/amb19.wav"
+            },
+            {
+                sentence_id: "amb20", 
+                condition: "ambiguous",
+                correct_image: "sticker.png",
+                support_image: "paper.png",
+                target_image: "mat.png",
+                images: ["images/paper.png", "images/sticker.png", "images/tag.png", "images/paper.png?v=2", "images/mat.png"],
+                audio: "audio/amb20.wav"
+            },
+            {
+                sentence_id: "unamb1",
+                condition: "unambiguous",
+                correct_image: "frog.png",
+                support_image: "napkin.png",
+                target_image: "box.png",
+                images: ["images/napkin.png", "images/frog.png", "images/horse.png", "images/napkin.png?v=2", "images/box.png"],
+                audio: "audio/unamb1.wav"
+            },
+            {
+                sentence_id: "unamb2",
+                condition: "unambiguous",
+                correct_image: "rabbit.png",
+                support_image: "towel.png",
+                target_image: "tray.png",
+                images: ["images/towel.png", "images/rabbit.png", "images/bird.png", "images/towel.png?v=2", "images/tray.png"],
+                audio: "audio/unamb2.wav"
+            },
+            {
+                sentence_id: "unamb3", 
+                condition: "unambiguous",
+                correct_image: "panda.png",
+                support_image: "blanket.png",
+                target_image: "chair.png",
+                images: ["images/blanket.png", "images/panda.png", "images/cow.png", "images/blanket.png?v=2", "images/chair.png"],
+                audio: "audio/unamb3.wav"
+            },
+            {
+                sentence_id: "unamb4", 
+                condition: "unambiguous",
+                correct_image: "cat.png",
+                support_image: "pillow.png",
+                target_image: "shelf.png",
+                images: ["images/pillow.png", "images/cat.png", "images/sheep.png", "images/pillow.png?v=2", "images/shelf.png"],
+                audio: "audio/unamb4.wav"
+            },
+            {
+                sentence_id: "unamb5", 
+                condition: "unambiguous",
+                correct_image: "brush.png",
+                support_image: "magazine.png",
+                target_image: "table.png",
+                images: ["images/magazine.png", "images/brush.png", "images/wrench.png", "images/magazine.png?v=2", "images/table.png"],
+                audio: "audio/unamb5.wav"
+            },
+            {
+              sentence_id: "unamb6", 
+                condition: "unambiguous",
+                correct_image: "marker.png",
+                support_image: "blanket.png",
+                target_image: "scarf.png",
+                images: ["images/blanket.png", "images/marker.png", "images/stapler.png", "images/blanket.png?v=2", "images/scarf.png"],
+                audio: "audio/unamb6.wav"
+            },
+            {
+                sentence_id: "unamb7", 
+                condition: "unambiguous",
+                correct_image: "orange.png",
+                support_image: "plate.png",
+                target_image: "tray.png",
+                images: ["images/plate.png", "images/orange.png", "images/pear.png", "images/plate.png?v=2", "images/tray.png"],
+                audio: "audio/unamb7.wav"
+            },
+            {
+                sentence_id: "unamb8", 
+                condition: "unambiguous",
+                correct_image: "bell.png",
+                support_image: "napkin.png",
+                target_image: "pillow.png",
+                images: ["images/napkin.png", "images/bell.png", "images/whistle.png", "images/napkin.png?v=2", "images/pillow.png"],
+                audio: "audio/unamb8.wav"
+            },
+            {
+                sentence_id: "unamb9", 
+                condition: "unambiguous",
+                correct_image: "candle.png",
+                support_image: "plate.png",
+                target_image: "card.png",
+                images: ["images/plate.png", "images/candle.png", "images/lamp.png", "images/plate.png?v=2", "images/card.png"],
+                audio: "audio/unamb9.wav"
+            },
+            {
+                sentence_id: "unamb10", 
+                condition: "unambiguous",
+                correct_image: "glasses.png",
+                support_image: "glove.png",
+                target_image: "book.png",
+                images: ["images/glove.png", "images/glasses.png", "images/hat.png", "images/glove.png?v=2", "images/book.png"],
+                audio: "audio/unamb10.wav"
+            },
+            {
+                sentence_id: "unamb11", 
+                condition: "unambiguous",
+                correct_image: "hammer.png",
+                support_image: "tray.png",
+                target_image: "tshirt.png",
+                images: ["images/tray.png", "images/hammer.png", "images/nail.png", "images/tray.png?v=2", "images/tshirt.png"],
+                audio: "audio/unamb11.wav"
+            },
+            {
+                sentence_id: "unamb12", 
+                condition: "unambiguous",
+                correct_image: "rock.png",
+                support_image: "book.png",
+                target_image: "glove.png",
+                images: ["images/book.png", "images/rock.png", "images/flower.png", "images/book.png?v=2", "images/glove.png"],
+                audio: "audio/unamb12.wav"
+            },
+            {
+                sentence_id: "unamb13", 
+                condition: "unambiguous",
+                correct_image: "pen.png",
+                support_image: "notebook.png",
+                target_image: "desk.png",
+                images: ["images/notebook.png", "images/pen.png", "images/ruler.png", "images/notebook.png?v=2", "images/desk.png"],
+                audio: "audio/unamb13.wav"
+            },
+            {
+                sentence_id: "unamb14", 
+                condition: "unambiguous",
+                correct_image: "cup.png",
+                support_image: "book.png",
+                target_image: "tray.png",
+                images: ["images/book.png", "images/cup.png", "images/fork.png", "images/book.png?v=2", "images/tray.png"],
+                audio: "audio/unamb14.wav"
+            },
+            {
+                sentence_id: "unamb15", 
+                condition: "unambiguous",
+                correct_image: "phone.png",
+                support_image: "folder.png",
+                target_image: "shelf.png",
+                images: ["images/folder.png", "images/phone.png", "images/clock.png", "images/folder.png?v=2", "images/shelf.png"],
+                audio: "audio/unamb15.wav"
+            },
+            {
+                sentence_id: "unamb16", 
+                condition: "unambiguous",
+                correct_image: "notebook.png",
+                support_image: "calendar.png",
+                target_image: "chair.png",
+                images: ["images/calendar.png", "images/notebook.png", "images/envelope.png", "images/calendar.png?v=2", "images/chair.png"],
+                audio: "audio/unamb16.wav"
+            },
+            {
+                sentence_id: "unamb17", 
+                condition: "unambiguous",
+                correct_image: "folder.png",
+                support_image: "placemat.png",
+                target_image: "bench.png",
+                images: ["images/placemat.png", "images/folder.png", "images/book.png", "images/placemat.png?v=2", "images/bench.png"],
+                audio: "audio/unamb17.wav"
+            },
+            {
+                sentence_id: "unamb18", 
+                condition: "unambiguous",
+                correct_image: "spoon.png",
+                support_image: "box.png",
+                target_image: "napkin.png",
+                images: ["images/box.png", "images/spoon.png", "images/fork.png", "images/box.png?v=2", "images/napkin.png"],
+                audio: "audio/unamb18.wav"
+            },
+            {
+                sentence_id: "unamb19", 
+                condition: "unambiguous",
+                correct_image: "card.png",
+                support_image: "plate.png",
+                target_image: "rug.png",
+                images: ["images/plate.png", "images/card.png", "images/ticket.png", "images/plate.png?v=2", "images/rug.png"],
+                audio: "audio/unamb19.wav"
+            },
+            {
+                sentence_id: "unamb20", 
+                condition: "unambiguous",
+                correct_image: "sticker.png",
+                support_image: "paper.png",
+                target_image: "mat.png",
+                images: ["images/paper.png", "images/sticker.png", "images/tag.png", "images/paper.png?v=2", "images/mat.png"],
+                audio: "audio/unamb20.wav"
+            },
+            {
+                sentence_id: "filler1",
+                condition: "filler",
+                correct_image: "frog.png",
+                support_image: null,
+                target_image: "box.png",
+                images: ["images/napkin.png", "images/frog.png", "images/box.png", "images/horse.png"],
+                audio: "audio/filler1.wav"
+            },
+            {
+                sentence_id: "filler2",
+                condition: "filler",
+                correct_image: "pen.png",
+                support_image: null,
+                target_image: "tray.png",
+                images: ["images/tray.png", "images/pen.png", "images/ruler.png", "images/box.png"],
+                audio: "audio/filler2.wav"
+            },
+            {
+                sentence_id: "filler3",
+                condition: "filler",
+                correct_image: "cup.png",
+                support_image: null,
+                target_image: "desk.png",
+                images: ["images/desk.png", "images/cup.png", "images/tray.png", "images/hat.png"],
+                audio: "audio/filler3.wav"
+            },
+            {
+                sentence_id: "filler4",
+                condition: "filler",
+                correct_image: "key.png",
+                support_image: null,
+                target_image: "shelf.png",
+                images: ["images/shelf.png", "images/key.png", "images/padlock.png", "images/glove.png"],
+                audio: "audio/filler4.wav"
+            },
+            {
+                sentence_id: "filler5",
+                condition: "filler",
+                correct_image: "phone.png",
+                support_image: null,
+                target_image: "rug.png",
+                images: ["images/rug.png", "images/phone.png", "images/clock.png", "images/paper.png"],
+                audio: "audio/filler5.wav"
+            },
+            {
+                sentence_id: "filler6",
+                condition: "filler",
+                correct_image: "book.png",
+                support_image: null,
+                target_image: "scarf.png",
+                images: ["images/scarf.png", "images/book.png", "images/pen.png", "images/calendar.png"],
+                audio: "audio/filler6.wav"
+            },
+            { 
+                sentence_id: "filler7",
+                condition: "filler",
+                correct_image: "coin.png",
+                support_image: null,
+                target_image: "book.png",
+                images: ["images/book.png", "images/coin.png", "images/banknote.png", "images/mirror.png"],
+                audio: "audio/filler7.wav"
+            },
+            {
+                sentence_id: "filler8",
+                condition: "filler",
+                correct_image: "brush.png",
+                support_image: null,
+                target_image: "tissue.png",
+                images: ["images/tissue.png", "images/brush.png", "images/wrench.png", "images/jar.png"],
+                audio: "audio/filler8.wav"
+            },
+            {
+                sentence_id: "filler9",
+                condition: "filler",
+                correct_image: "bowl.png",
+                support_image: null,
+                target_image: "card.png",
+                images: ["images/card.png", "images/bowl.png", "images/kettle.png", "images/tape.png"],
+                audio: "audio/filler9.wav"
+            },
+            {
+                sentence_id: "filler10",
+                condition: "filler",
+                correct_image: "mug.png",
+                support_image: null,
+                target_image: "towel.png",
+                images: ["images/towel.png", "images/mug.png", "images/cutting-board.png", "images/book.png"],
+                audio: "audio/filler10.wav"
+            },
+            {
+                sentence_id: "filler11",
+                condition: "filler",
+                correct_image: "lamp.png",
+                support_image: null,
+                target_image: "pillow.png",
+                images: ["images/pillow.png", "images/lamp.png", "images/chair.png", "images/envelope.png"],
+                audio: "audio/filler11.wav"
+            },
+            {
+                sentence_id: "filler12",
+                condition: "filler",
+                correct_image: "dog.png",
+                support_image: null,
+                target_image: "table.png",
+                images: ["images/table.png", "images/dog.png", "images/ticket.png", "images/nail.png"],
+                audio: "audio/filler12.wav"
+            },
+            {
+                sentence_id: "filler13",
+                condition: "filler",
+                correct_image: "cat.png",
+                support_image: null,
+                target_image: "horse.png",
+                images: ["images/horse.png", "images/cat.png", "images/bag.png", "images/drawer.png"],
+                audio: "audio/filler13.wav"
+            },
+            {
+                sentence_id: "filler14",
+                condition: "filler",
+                correct_image: "glasses.png",
+                support_image: null,
+                target_image: "glasses2.png",
+                images: ["images/glasses2.png", "images/glasses.png", "images/cup.png", "images/picture.png"],
+                audio: "audio/filler14.wav"
+            },
+            {
+                sentence_id: "filler15",
+                condition: "filler",
+                correct_image: "comb.png",
+                support_image: null,
+                target_image: "bottle.png",
+                images: ["images/bottle.png", "images/comb.png", "images/whistle.png", "images/carrot.png"],
+                audio: "audio/filler15.wav"
+            },
+            {
+                sentence_id: "filler16",
+                condition: "filler",
+                correct_image: "candle.png",
+                support_image: null,
+                target_image: "shelf.png",
+                images: ["images/shelf.png", "images/candle.png", "images/hammer.png", "images/card.png"],
+                audio: "audio/filler16.wav"
+            },
+            {
+                sentence_id: "filler17",
+                condition: "filler",
+                correct_image: "paper.png",
+                support_image: null,
+                target_image: "mat.png",
+                images: ["images/mat.png", "images/paper.png", "images/bird.png", "images/folder.png"],
+                audio: "audio/filler17.wav"
+            },
+            {
+                sentence_id: "filler18",
+                condition: "filler",
+                correct_image: "spoon.png",
+                support_image: null,
+                target_image: "bowl.png",
+                images: ["images/bowl.png", "images/spoon.png", "images/hat.png", "images/bill.png"],
+                audio: "audio/filler18.wav"
+            },
+            {
+                sentence_id: "filler19",
+                condition: "filler",
+                correct_image: "plate.png",
+                support_image: null,
+                target_image: "table.png",
+                images: ["images/table.png", "images/plate.png", "images/carpet.png", "images/pencil.png"],
+                audio: "audio/filler19.wav"
+            },
+            {
+                sentence_id: "filler20",
+                condition: "filler",
+                correct_image: "folder.png",
+                support_image: null,
+                target_image: "bag.png",
+                images: ["images/bag.png", "images/folder.png", "images/pillow.png", "images/pin.png"],
+                audio: "audio/filler20.wav"
+            },
+            {
+                sentence_id: "filler21",
+                condition: "filler",
+                correct_image: "marker.png",
+                support_image: null,
+                target_image: "book.png",
+                images: ["images/book.png", "images/marker.png", "images/pear.png", "images/mirror.png"],
+                audio: "audio/filler21.wav"
+            },
+            {
+                sentence_id: "filler22",
+                condition: "filler",
+                correct_image: "scissors.png",
+                support_image: null,
+                target_image: "drawer.png",
+                images: ["images/drawer.png", "images/scissors.png", "images/tshirt.png", "images/bottle.png"],
+                audio: "audio/filler22.wav"
+            },
+            {
+                sentence_id: "filler23",
+                condition: "filler",
+                correct_image: "eraser.png",
+                support_image: null,
+                target_image: "cup.png",
+                images: ["images/cup.png", "images/eraser.png", "images/tray.png", "images/sink.png"],
+                audio: "audio/filler23.wav"
+            },
+            {
+                sentence_id: "filler24",
+                condition: "filler",
+                correct_image: "ball.png",
+                support_image: null,
+                target_image: "bench.png",
+                images: ["images/bench.png", "images/ball.png", "images/plate.png", "images/sock.png"],
+                audio: "audio/filler24.wav"
+            },
+            {
+                sentence_id: "filler25",
+                condition: "filler",
+                correct_image: "ruler.png",
+                support_image: null,
+                target_image: "notebook.png",
+                images: ["images/notebook.png", "images/ruler.png", "images/napkin.png", "images/couch.png"],
+                audio: "audio/filler25.wav"
+            },
+            {
+                sentence_id: "filler26",
+                condition: "filler",
+                correct_image: "box.png",
+                support_image: null,
+                target_image: "couch.png",
+                images: ["images/couch.png", "images/box.png", "images/rabbit.png", "images/cow.png"],
+                audio: "audio/filler26.wav"
+            },
+            {
+                sentence_id: "filler27",
+                condition: "filler",
+                correct_image: "sock.png",
+                support_image: null,
+                target_image: "shoe.png",
+                images: ["images/shoe.png", "images/sock.png", "images/bottle.png", "images/curtain.png"],
+                audio: "audio/filler27.wav"
+            },
+            {
+                sentence_id: "filler28",
+                condition: "filler",
+                correct_image: "note.png",
+                support_image: null,
+                target_image: "fridge.png",
+                images: ["images/fridge.png", "images/note.png", "images/carpet.png", "images/desk.png"],
+                audio: "audio/filler28.wav"
+            },
+            {
+                sentence_id: "filler29",
+                condition: "filler",
+                correct_image: "jar.png",
+                support_image: null,
+                target_image: "sink.png",
+                images: ["images/sink.png", "images/jar.png", "images/candle.png", "images/flower.png"],
+                audio: "audio/filler29.wav"
+            },
+            {
+                sentence_id: "filler30",
+                condition: "filler",
+                correct_image: "pencil.png",
+                support_image: null,
+                target_image: "folder.png",
+                images: ["images/folder.png", "images/pencil.png", "images/brush.png", "images/dog.png"],
+                audio: "audio/filler30.wav"
+            },
+            {
+                sentence_id: "filler31",
+                condition: "filler",
+                correct_image: "picture.png",
+                support_image: null,
+                target_image: "lamp.png",
+                images: ["images/lamp.png", "images/picture.png", "images/table.png", "images/stapler.png"],
+                audio: "audio/filler31.wav"
+            },
+            {
+                sentence_id: "filler32",
+                condition: "filler",
+                correct_image: "tag.png",
+                support_image: null,
+                target_image: "envelope.png",
+                images: ["images/envelope.png", "images/tag.png", "images/scarf.png", "images/charger.png"],
+                audio: "audio/filler32.wav"
+            },
+            {
+                sentence_id: "filler33",
+                condition: "filler",
+                correct_image: "charger.png",
+                support_image: null,
+                target_image: "bed.png",
+                images: ["images/bed.png", "images/charger.png", "images/shelf.png", "images/spoon.png"],
+                audio: "audio/filler33.wav"
+            },
+            {
+                sentence_id: "filler34",
+                condition: "filler",
+                correct_image: "tray.png",
+                support_image: null,
+                target_image: "curtain.png",
+                images: ["images/curtain.png", "images/tray.png", "images/sponge.png", "images/pillow.png"],
+                audio: "audio/filler34.wav"
+            },
+            {
+                sentence_id: "filler35",
+                condition: "filler",
+                correct_image: "ticket.png",
+                support_image: null,
+                target_image: "cushion.png",
+                images: ["images/cushion.png", "images/ticket.png", "images/tag.png", "images/padlock.png"],
+                audio: "audio/filler35.wav"
+            },
+            {
+                sentence_id: "filler36",
+                condition: "filler",
+                correct_image: "poster.png",
+                support_image: null,
+                target_image: "mirror.png",
+                images: ["images/mirror.png", "images/poster.png", "images/blanket.png", "images/ball.png"],
+                audio: "audio/filler36.wav"
+            },
+            {
+                sentence_id: "filler37",
+                condition: "filler",
+                correct_image: "nail.png",
+                support_image: null,
+                target_image: "paper.png",
+                images: ["images/paper.png", "images/nail.png", "images/bed.png", "images/apple.png"],
+                audio: "audio/filler37.wav"
+            },
+            {
+                sentence_id: "filler38",
+                condition: "filler",
+                correct_image: "pin.png",
+                support_image: null,
+                target_image: "board.png",
+                images: ["images/board.png", "images/pin.png", "images/basket.png", "images/clock.png"],
+                audio: "audio/filler38.wav"
+            },
+            {
+                sentence_id: "filler39",
+                condition: "filler",
+                correct_image: "sponge.png",
+                support_image: null,
+                target_image: "cup.png",
+                images: ["images/cup.png", "images/sponge.png", "images/notebook.png", "images/glove.png"],
+                audio: "audio/filler39.wav"
+            },
+            {
+                sentence_id: "filler40",
+                condition: "filler",
+                correct_image: "basket.png",
+                support_image: null,
+                target_image: "carpet.png",
+                images: ["images/carpet.png", "images/basket.png", "images/rabbit.png", "images/comb.png"],
+                audio: "audio/filler40.wav"
+            },
+            {
+                sentence_id: "practice",
+                condition: "practice",
+                correct_image: "flower.png",
+                support_image: null,
+                target_image: "desk.png",
+                images: ["images/desk.png", "images/flower.png", "images/clock.png", "images/apple.png"],
+                audio: "audio/practice.wav"
+            }
+        ];
+
+        const timestamp = Date.now();
+
+        // 1. Önce kategorilere ayır
+        const amb = sentences.filter(s => s.condition === "ambiguous");
+        const unamb = sentences.filter(s => s.condition === "unambiguous");
+        const filler = sentences.filter(s => s.condition === "filler");
+        const practice_sent = sentences.find(s => s.condition === "practice");
+        
+        function makeVWBlock(sentence) {
+            return [{
+                timeline: [fixation_vw, drag_drop],
+                timeline_variables: [sentence] 
+            }];
+        }
+
+        const feedback_vw = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: function () {
+                const last_trial = jsPsych.data.get().filter({trial_type: 'free-sort'}).last(1).values()[0];
+
+                if (last_trial && last_trial.accuracy === 1) {
+                    return '<p style="color:green; font-size:24px;">Correct!</p>';
+                } 
+                else {
+                    return '<p style="color:red; font-size:24px;">Incorrect! Try again.</p>';
+                }
+            },
+            choices: "NO_KEYS",
+            trial_duration: 900
+        };
+        function repeatTillCorrectDragDrop(values) {
+            return {
+                timeline: [
+                    fixation_vw, 
+                    {
+                        timeline: [drag_drop],
+                        timeline_variables: [values]
+                    },
+                    feedback_vw
+                ],
+                loop_function: function(data) {
+                    var last_trial = data.filter({trial_type: 'free-sort'}).last(1).values()[0];
+
+                    if (last_trial) {
+                        if (last_trial.accuracy == 1) {
+                            return false; 
+                        } else {
+                            return true;  
+                        }
+                    }
+                    return false; 
+                }
+            };
+        }
+        const practice_vw = repeatTillCorrectDragDrop(practice_sent);         
+
+        let amb_shuffled = jsPsych.randomization.shuffle(amb);
+        let unamb_shuffled = jsPsych.randomization.shuffle(unamb);
+
+        let amb_pairs = amb_shuffled.map((s, i) => {
+        let stroop = (i < 1) ? congruent() : incongruent();
+        return [makeStroopTrial(stroop), ...makeVWBlock(s)]; 
+        });
+        let unamb_pairs = unamb_shuffled.map((s, i) => {
+        let stroop = (i < 1) ? congruent() : incongruent();
+        return [makeStroopTrial(stroop), ...makeVWBlock(s)];
+        });
+        let filler_trials = filler.map(s => makeVWBlock(s));
+
+
+
+        let critical_trials = [].concat(amb_pairs, unamb_pairs);
+        let mixed_pool = jsPsych.randomization.shuffle([].concat(filler_trials, extra_stroops));
+
+        let all_experiment = [].concat(critical_trials, mixed_pool);
+        
+
+
+        let shuffled_experiment = jsPsych.randomization.shuffle(all_experiment);
+
+        //Bilingual questionnaire
+        let participant_type = null;  // "mono" veya "bi"
+        let eligible = null;  
+        var not_eligible = {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: "<p>Thank you for your answers. Unfortunately, you are not eligible to take part in this study.</p>",
+            choices: ["End"]
+        };
+        var q1_participant_type = {
+            type: jsPsychSurveyMultiChoice,
+            questions: [
+                {
+                prompt: "Which statement best describes you?", 
+                name: 'participant_type', 
+                options: ["I am an <b>English monolingual</b> (I only use English in my daily life).", "I am a <b>bilingual</b> (I regularly use English and another language)."], 
+                required: true
+                }, 
+            ],
+        
+            on_finish: function(data) {
+                var answer = data.response.participant_type;
+                if (answer === "I am an <b>English monolingual</b> (I only use English in my daily life).") {participant_type = "mono";
+                }
+
+                if (answer === "I am a <b>bilingual</b> (I regularly use English and another language).") {participant_type = "bi";
+                }
+            }
+        };
+        var q2_monolingual = {
+            type: jsPsychSurveyMultiChoice,
+            questions: [
+                {
+                prompt: "Apart from English, do you understand or speak any other language?",
+                name: 'mono_other_language',
+                options: [
+                    "No, I only speak English.",
+                    "Yes, but only a few words or phrases.",
+                    "Yes, I can understand and use another language in daily life."],
+                required: true
+                }
+            ],
+            on_finish: function(data) {
+                var answer = data.response.mono_other_language;
+
+                if (answer === "No, I only speak English." || answer === "Yes, but only a few words or phrases.") {eligible = true;
+                } else {eligible = false;
+                }
+            }
+        };
+        var q2_bilingual = {
+            type: jsPsychSurveyMultiChoice,
+            questions: [
+                { 
+                prompt: "What is your first language (L1)?",
+                name: "L1",
+                options: ["Turkish", "Spanish", "Another language"],
+                required: true
+                },
+                {
+                prompt: "Are you fluent in English?",
+                name: "L2",
+                options: ["Yes", "No"],
+                required: true
+                }
+            ],
+            on_finish: function(data) {
+                var L1 = data.response.L1;
+                var L2 = data.response.L2;
+
+                eligible = true;
+                if (L1 === "Another language" || L2 === "No") {eligible = false;}
+            }
+        };
+        var aoa_bilingual = {
+            type: jsPsychSurveyText,
+            questions: [
+                {
+                prompt: "At what age did you begin learning <b>English</b>?",
+                name: "AoA",
+                required: true
+                }
+            ],
+            on_finish: function(data) {
+                var AoA = data.response.AoA;
+            }
+        };
+        var age = {
+            type: jsPsychSurveyText,
+            questions: [
+                {
+                prompt: "How old are you?",
+                name: "age",
+                required: true
+                }
+            ],
+            on_finish: function(data) {
+                var age = data.response.age;
+            }
+        };
+        var likert_prof = [
+            "Very Poor", 
+            "Poor", 
+            "Limited", 
+            "Average", 
+            "Good",
+            "Very Good",
+            "Excellent"
+        ];
+        var proficiency_L1 = {
+            type: jsPsychSurveyLikert,
+            preamble: "<p>Rate your current ability in terms of listening, reading, speaking and writing in your <b>FIRST language</b></p>",
+            questions: [
+                {prompt: "Listening in L1", name: "L1_listening", labels: likert_prof, required: true},
+                {prompt: "Reading in L1", name: "L1_reading", labels: likert_prof, required: true},
+                {prompt: "Speaking in L1", name: "L1_speaking", labels: likert_prof, required: true},
+                {prompt: "Writing in L1", name: "L1_writing", labels: likert_prof, required: true}
+            ],
+            on_finish: function(data) {
+                var L1_listening = data.response.L1_listening;
+                var L1_reading = data.response.L1_reading;
+                var L1_speaking = data.response.L1_speaking;
+                var L1_writing = data.response.L1_writing;
+            }
+        }
+        var proficiency_L2 = {
+            type: jsPsychSurveyLikert,
+            preamble: "<p>Rate your current ability in terms of listening, reading, speaking and writing in <b>ENGLISH</b></p>",
+            questions: [
+                {prompt: "Listening in English", name: "L2_listening", labels: likert_prof, required: true},
+                {prompt: "Reading in English", name: "L2_reading", labels: likert_prof, required: true},
+                {prompt: "Speaking in English", name: "L2_speaking", labels: likert_prof, required: true},
+                {prompt: "Writing in English", name: "L2_writing", labels: likert_prof, required: true}
+            ],
+            on_finish: function(data) {
+                var L2_listening = data.response.L2_listening;
+                var L2_reading = data.response.L2_reading;
+                var L2_speaking = data.response.L2_speaking;
+                var L2_writing = data.response.L2_writing;
+            }
+
+        }
+        var likert_freq = [
+            "Never",
+            "Rarely", 
+            "Sometimes",
+            "Regularly",
+            "Often",
+            "Usually", 
+            "Always"
+        ];
+        var frequency = {
+            type: jsPsychSurveyLikert,
+            preamble: "<p><b>Rate how frequently you currently use each of the languages</b></p>",
+            questions: [
+                {prompt: "How often do you use English?", name: "eng_freq", labels: likert_freq, required: true},
+                {prompt: "How often do you use your other language?", name: "oth_freq", labels: likert_freq, required: true}
+            ],
+            on_finish: function(data) {
+                var eng_freq = data.response.eng_freq;
+                var oth_freq = data.response.oth_freq;
+            }
+        }
+
+        var timeline = [];
+        timeline.push(preload);
+        timeline.push(welcome, q1_participant_type);
+        timeline.push({
+            timeline:[q2_monolingual, age],
+            conditional_function: function() {
+                return participant_type === "mono";
+            }
+        });
+        // 3) Q2_bi: if bilingual
+        timeline.push({
+            timeline: [age, q2_bilingual, aoa_bilingual, proficiency_L1, proficiency_L2, frequency],
+            conditional_function: function() {
+                return participant_type === "bi";
+            }
+        });
+
+        // 4) Not eligible screen
+        timeline.push({
+            timeline: [not_eligible],
+            conditional_function: function() {
+                return eligible === false;
+            }
+        });
+
+        // 5) Main experiment
+        const experiment_body = {
+            timeline: (function() {
+                let temp_timeline = [eligible_text, calibration, validation, 
+                calibration_done, instructions1, instructions2,
+                practice_congruent1, practice_incongruent1, practice_congruent2, practice_incongruent2, 
+                instructions3, practice_vw,
+                start_experiment];
+                
+                // trials
+                shuffled_experiment.forEach(trialset => {
+                    temp_timeline.push(...trialset);
+                });
+                
+                return temp_timeline;
+            })(),
+            conditional_function: function() {
+                return eligible === true;
+            }
+        };
+        timeline.push(experiment_body);
+        const end_screen = {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: "<p>Thank you for participating!</p><p>You may now close this window.</p>",
+            choices: ["Finish"]
+        };
+
+        timeline.push(end_screen);
+        jsPsych.run(timeline);
+    </script>
+</html>
