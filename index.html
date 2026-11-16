@@ -57,7 +57,7 @@
         };
         const instructions3 = {
             type: jsPsychHtmlButtonResponse,
-            stimulus: '<h2> Great! </h2><p style="font-size: 20px;"> Now, let\'s try the language task.</p><h3> You will hear a sentence, and drag and drop the object.</h3><p> Please make sure your computer\'s <b>SOUND IS ON.</b></p><h3> Please DO NOT use Bluetooth headphones, as they may cause audio delays.</h3>',
+            stimulus: '<h2> Great! </h2><p style="font-size: 20px;"> Now, let\'s try the language task.</p><h3> You will hear a sentence, and drag and drop the object.</h3><p> Please make sure your computer\'s <b>SOUND IS ON.</b></p><h4> Please DO NOT use Bluetooth headphones, as they may cause audio delays.</h4>',
 			choices: ['Next'],
         };
         
@@ -296,13 +296,71 @@
                 webgazer.showFaceOverlay(true);
             }
         };
+		 const calibration_dots = {
+            type: jsPsychHtmlKeyboardResponse,
+            record_data: false,
+            stimulus: '<p id="calib-text">Please wait, the camera is starting...</p>',
+            choices: "NO_KEYS",
+            on_load: function () {
+                const points = jsPsych.randomization.shuffle(
+                    [[10,10],[50,10],[90,10],[10,50],[50,50],[90,50],[10,90],[50,90],[90,90]]
+                );
+                const CLICKS = 3;
+
+                function start() {
+                    webgazer.showVideoPreview(false);
+                    webgazer.showFaceOverlay(false);
+                    webgazer.showPredictionPoints(false);
+                    document.getElementById('calib-text').innerHTML =
+                        'Look at each red dot and click on it ' + CLICKS + ' times.';
+
+                    const dot = document.createElement('div');
+                    dot.style.cssText = 'position:fixed; width:24px; height:24px; border-radius:50%;' +
+                        'background:red; transform:translate(-50%,-50%); cursor:pointer; z-index:100000;';
+                    document.body.appendChild(dot);
+
+                    let i = 0, clicks = 0;
+                    function place() {
+                        dot.style.left = points[i][0] + '%';
+                        dot.style.top = points[i][1] + '%';
+                        dot.style.opacity = 1;
+                        clicks = 0;
+                    }
+                    dot.addEventListener('click', function () {
+                        clicks++;
+                        dot.style.opacity = 1 - clicks * 0.25;
+                        if (clicks >= CLICKS) {
+                            i++;
+                            if (i < points.length) {
+                                place();
+                            } else {
+                                dot.remove();
+                                webgazer.showVideoPreview(true);
+                                webgazer.showFaceOverlay(true);
+                                webgazer.showPredictionPoints(true);
+                                jsPsych.finishTrial({ phase: 'calibration' });
+                            }
+                        }
+                    });
+                    place();
+                }
+                (function waitReady() {
+                    if (webgazer.isReady && webgazer.isReady()) start();
+                    else setTimeout(waitReady, 200);
+                })();
+            }
+        };
+
+		
         const validation = {
             type: jsPsychHtmlKeyboardResponse,
             stimulus: `
                 <div style="width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center;">
                     <div style="text-align: center;">
                         <p><b>Quality Check</b></p>
-                        <p>Please look directly at the <b>PURPLE DOT</b> and press <b>SPACE</b>.</p>
+                        <p>Please click anywhere on the screen and wait until a <b>MOVING RED DOT</b> appears (this shows your eye movements are being tracked).</p> 
+                        <p>Then, look at the <b>PURPLE DOT</b>.</p>
+                        <p>Make sure the <b>MOVING RED DOT</b> is following your eye movements. Then press <b>SPACE</b>.</p>
                         <div style="width: 20px; height: 20px; background: purple; border-countsroi_counts: 50%; margin: 20px auto; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>
                     </div>
                 </div>
@@ -1487,7 +1545,7 @@
         // 5) Main experiment
         const experiment_body = {
             timeline: (function() {
-                let temp_timeline = [eligible_text, calibration, validation, 
+                let temp_timeline = [eligible_text, calibration, calibration_dots, validation, 
                 calibration_done, instructions1, instructions2,
                 practice_congruent1, practice_incongruent1, practice_congruent2, practice_incongruent2, 
                 instructions3, practice_vw,
