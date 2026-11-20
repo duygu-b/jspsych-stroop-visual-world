@@ -313,7 +313,7 @@
                 </p>
             `,
             choices: ["Start calibration"],
-            on_finish: async function () {
+            on_start: async function () {
                 await webgazer.clearGazeListener();
                 await webgazer.begin();
                 webgazer.showPredictionPoints(true);
@@ -376,7 +376,8 @@
 
                 // Wait until WebGazer is ready (camera permission etc.)
                 (function waitReady() {
-                    if (webgazer.isReady && webgazer.isReady()) start();
+                    const face = webgazer.getTracker().getPositions();
+                    if (webgazer.isReady() && face) start();
                     else setTimeout(waitReady, 200);
                 })();
             }
